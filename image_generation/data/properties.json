@@ -1,25 +1,27 @@
 {
   "shapes": {
-    "cube": "SmoothCube_v2",
+    "inclinedcylinder": "SmoothLowCylinderInclined",
+    "flat": "SmoothLowCylinderInclined_flat",
     "sphere": "Sphere",
-    "cylinder": "SmoothCylinder"
+    "disk": "SmoothDisk_highIncline"
   },
   "colors": {
     "gray": [87, 87, 87],
-    "red": [173, 35, 35],
-    "blue": [42, 75, 215],
     "green": [29, 105, 20],
     "brown": [129, 74, 25],
-    "purple": [129, 38, 192],
-    "cyan": [41, 208, 208],
+    "lightgreen": [129, 197, 122],
+    "limegreen": [50, 205, 50],
+    "forestgreen": [34, 139, 34],
+    "darkgreen": [0, 100, 0],
+    "olivegreen": [85, 107, 47],
     "yellow": [255, 238, 51]
   },
   "materials": {
-    "rubber": "Rubber",
-    "metal": "MyMetal"
+    "rubber": "Rubber"
   },
   "sizes": {
     "large": 0.7,
+    "medium": 0.5,
     "small": 0.35
   }
 }

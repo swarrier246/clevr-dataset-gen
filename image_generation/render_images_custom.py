@@ -9,6 +9,7 @@ from __future__ import print_function
 import math, sys, random, argparse, json, os, tempfile
 from datetime import datetime as dt
 from collections import Counter
+import numpy as np
 
 """
 Renders random scenes using Blender, each with with a random number of objects;
@@ -78,6 +79,8 @@ parser.add_argument('--min_pixels_per_object', default=200, type=int,
     help="All objects will have at least this many visible pixels in the " +
          "final rendered images; this ensures that no objects are fully " +
          "occluded by other objects.")
+parser.add_argument('--rot_angle', default=20, type=float, 
+    help="Amount of rotation for objects between placing consecutive leaves")
 parser.add_argument('--max_retries', default=50, type=int,
     help="The number of times to try placing an object before giving up and " +
          "re-placing all objects in the scene.")
@@ -161,6 +164,7 @@ def main(args):
   img_template = os.path.join(args.output_image_dir, img_template)
   scene_template = os.path.join(args.output_scene_dir, scene_template)
   blend_template = os.path.join(args.output_blend_dir, blend_template)
+
 
   if not os.path.isdir(args.output_image_dir):
     os.makedirs(args.output_image_dir)
@@ -369,6 +373,9 @@ def add_random_objects(scene_struct, num_objects, args, camera):
       color_name_to_rgba[name] = rgba
     material_mapping = [(v, k) for k, v in properties['materials'].items()]
     object_mapping = [(v, k) for k, v in properties['shapes'].items()]
+    leaf_properties = properties['shapes'].copy()
+    leaf_properties.pop('sphere')
+    leaf_obj_mapping = [(v,k) for k,v in leaf_properties.items()]
     size_mapping = list(properties['sizes'].items())
 
   shape_color_combos = None
@@ -379,82 +386,30 @@ def add_random_objects(scene_struct, num_objects, args, camera):
   positions = []
   objects = []
   blender_objects = []
+
+    
+  size_name, r = random.choice(size_mapping)
+  color_name, rgba = random.choice(list(color_name_to_rgba.items()))
+
+  # Place first disk near the centre of the sphere
   for i in range(num_objects):
-    # Choose a random size
-    size_name, r = random.choice(size_mapping)
-
-    # Try to place the object, ensuring that we don't intersect any existing
-    # objects and that we are more than the desired margin away from all existing
-    # objects along all cardinal directions.
-    num_tries = 0
-    while True:
-      # If we try and fail to place an object too many times, then delete all
-      # the objects in the scene and start over.
-      num_tries += 1
-      if num_tries > args.max_retries:
-        for obj in blender_objects:
-          utils.delete_object(obj)
-        return add_random_objects(scene_struct, num_objects, args, camera)
-      
-
-      x = random.uniform(-3, 3)
-      y = random.uniform(-3, 3)
-
-      # Info Comment: For first loop, (x,y) as position and r as radius initialized above are placed in positions list. The for loop 
-      # below exists to ensure min dist between objects.
-
-      # Maybe add code to limit spacing if nb of objects is low? (so if fewer objs and/or smaller size(?), closer together)
-
-      # For first object, have anchor position.
-      if not positions: 
-        x = 0.0 
-        y = 0.0 
-
-      # Check to make sure the new object is further than min_dist and closer than max distance (2(r+rr)) from all
-      # other objects, and further than margin along the four cardinal directions
-      dists_good = True
-      margins_good = True
-      # print('positions: ',positions)
-      for (xx, yy, rr) in positions:
-        # print("r, rr: ", r, " , ", rr)
-        dx, dy = x - xx, y - yy
-        dist = math.sqrt(dx * dx + dy * dy)
-        max_dist = 2*(r+rr)
-        # print("x_dist, min_dist, max_dist: ", dist - r -rr, " , ", args.min_dist, " , ", max_dist)
-        if (dist - r - rr < args.min_dist) or (dist - r - rr > (2 * (r + rr))):
-          dists_good = False
-          break
-        for direction_name in ['left', 'right', 'front', 'behind']:
-          direction_vec = scene_struct['directions'][direction_name]
-          assert direction_vec[2] == 0
-          margin = dx * direction_vec[0] + dy * direction_vec[1]
-          if 0 < margin < args.margin:
-            print(margin, args.margin, direction_name)
-            print('BROKEN MARGIN!')
-            margins_good = False
-            break
-        if not margins_good:
-          break
-
-      if dists_good and margins_good:
-        break
-
-    # Choose random color and shape
-    if shape_color_combos is None:
-      obj_name, obj_name_out = random.choice(object_mapping) # obj_name_out is the key and obj_name is val
-      color_name, rgba = random.choice(list(color_name_to_rgba.items()))
+    # Choose orientation 0 for the object.
+    theta = 0.0
+    if not positions:
+      x = 0.0
+      y = 0.0
+      obj_name_out = str('sphere')
+      obj_name = properties['shapes']['sphere']
+      #print("Val and key", obj_name, obj_name_out)
     else:
-      obj_name_out, color_choices = random.choice(shape_color_combos)
-      color_name = random.choice(color_choices)
-      obj_name = [k for k, v in object_mapping if v == obj_name_out][0]
-      rgba = color_name_to_rgba[color_name]
+      pos = np.arange(-1.1, 0.0, 0.1) + np.arange(0.05, 1.1, 0.1)
+      x = random.choice(pos)
+      y = random.choice(pos)
+      obj_name, obj_name_out = random.choice(leaf_obj_mapping)
 
-    # For cube, adjust the size a bit
-    if obj_name == 'Cube':
-      r /= math.sqrt(2)
-
-    # Choose random orientation for the object.
-    theta = 360.0 * random.random()
+      
+    size_name, r = random.choice(size_mapping)
+    color_name, rgba = random.choice(list(color_name_to_rgba.items())) 
 
     # Actually add the object to the scene
     utils.add_object(args.shape_dir, obj_name, r, (x, y), theta=theta)
@@ -477,19 +432,28 @@ def add_random_objects(scene_struct, num_objects, args, camera):
       'pixel_coords': pixel_coords,
       'color': color_name,
     })
+    print("Object properties: ", obj_name_out, size_name)
+    # Rotate objects on axis of central sphere before placing next object
+    # Create a parent
+    parent_object = blender_objects[0]
+    
+    if (len(positions) > 1 and obj.type == "MESH"):
+      obj.select = True
+      parent_object.select = True
+      obj.parent = parent_object
+      parent_object.matrix_parent_inverse = obj.matrix_world.inverted()
+      # print("Parent and child: ", parent_object, obj)
+    rot_angle = 360.0 / (float(num_objects - 1))  # to have some overlap between objects
+    # print("Rotation angle and nb_objects: ", rot_angle, num_objects)
+    bpy.ops.transform.rotate(value=rot_angle)
+    parent_object.select = False  
+    obj.select = False
+    bpy.ops.object.select_all(action='DESELECT')
 
   # Check that all objects are at least partially visible in the rendered image
   all_visible = check_visibility(blender_objects, args.min_pixels_per_object)
-  if not all_visible:
-    # If any of the objects are fully occluded then start over; delete all
-    # objects from the scene and place them all again.
-    print('Some objects are occluded; replacing objects')
-    for obj in blender_objects:
-      utils.delete_object(obj)
-    return add_random_objects(scene_struct, num_objects, args, camera)
 
   return objects, blender_objects
-
 
 def compute_all_relationships(scene_struct, eps=0.2):
   """
