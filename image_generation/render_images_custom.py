@@ -10,6 +10,8 @@ import math, sys, random, argparse, json, os, tempfile
 from datetime import datetime as dt
 from collections import Counter
 import numpy as np
+from math import isclose
+from mathutils import Matrix, Vector, Quaternion
 
 """
 Renders random scenes using Blender, each with with a random number of objects;
@@ -217,6 +219,42 @@ def _register_meshes():
       meshes.append(obj)
   return meshes
 
+def convert_to_array(matrix_obj):
+  ''' Input: 3x3 matrix from mathutils
+  Output: Array type, for bpy rotate function
+  '''
+  array = np.array(np.vstack(([matrix_obj[i] for i in range(len(matrix_obj))])))
+  print(array)
+  return array
+
+
+'''
+Rotation function; Reference: https://devtalk.blender.org/t/bpy-ops-transform-rotate-option-axis/6235
+'''
+def create_z_orient(rot_vec):
+    x_dir_p = Vector(( 1.0,  0.0,  0.0))
+    y_dir_p = Vector(( 0.0,  1.0,  0.0))
+    z_dir_p = Vector(( 0.0,  0.0,  1.0))
+    tol = 0.001
+    rx, ry, rz = rot_vec
+    if isclose(rx, 0.0, abs_tol=tol) and isclose(ry, 0.0, abs_tol=tol):
+        if isclose(rz, 0.0, abs_tol=tol) or isclose(rz, 1.0, abs_tol=tol):
+            return Matrix((x_dir_p, y_dir_p, z_dir_p))  # 3x3 identity
+    new_z = rot_vec.copy()  # rot_vec already normalized
+    new_y = new_z.cross(z_dir_p)
+    new_y_eq_0_0_0 = True
+    for v in new_y:
+        if not isclose(v, 0.0, abs_tol=tol):
+            new_y_eq_0_0_0 = False
+            break
+    if new_y_eq_0_0_0:
+        new_y = y_dir_p
+    new_x = new_y.cross(new_z)
+    new_x.normalize()
+    new_y.normalize()
+    return Matrix(((new_x.x, new_y.x, new_z.x),
+                   (new_x.y, new_y.y, new_z.y),
+                   (new_x.z, new_y.z, new_z.z)))
 
 def render_scene(args,
     num_objects=5,
@@ -387,29 +425,32 @@ def add_random_objects(scene_struct, num_objects, args, camera):
   objects = []
   blender_objects = []
 
-    
+  init_rot = 0
   size_name, r = random.choice(size_mapping)
   color_name, rgba = random.choice(list(color_name_to_rgba.items()))
 
   # Place first disk near the centre of the sphere
   for i in range(num_objects):
     # Choose orientation 0 for the object.
-    theta = 0.0
+    size_name, r = random.choice(size_mapping)
+    color_name, rgba = random.choice(list(color_name_to_rgba.items())) 
+    theta = 30.0
     if not positions:
       x = 0.0
       y = 0.0
       obj_name_out = str('sphere')
       obj_name = properties['shapes']['sphere']
-      #print("Val and key", obj_name, obj_name_out)
     else:
-      pos = np.arange(-1.1, 0.0, 0.1) + np.arange(0.05, 1.1, 0.1)
-      x = random.choice(pos)
-      y = random.choice(pos)
+      pos_y = np.arange(-(1+(1.2*r)), -1.2*r, 0.1) + np.arange(1.2*r, (1+(1.2*r)), 0.1)
+      pos_x = np.arange(1.2*r, (1+(1.2*r)), 0.1)
+      x = random.choice(pos_x)
+      y = random.choice(pos_y)
       obj_name, obj_name_out = random.choice(leaf_obj_mapping)
 
-      
-    size_name, r = random.choice(size_mapping)
-    color_name, rgba = random.choice(list(color_name_to_rgba.items())) 
+      # TEST CASE: Place single object:
+      # obj_name_out = str('disk')
+      # obj_name = properties['shapes']['disk']
+      # print("x, y: ", x,y)
 
     # Actually add the object to the scene
     utils.add_object(args.shape_dir, obj_name, r, (x, y), theta=theta)
@@ -434,21 +475,36 @@ def add_random_objects(scene_struct, num_objects, args, camera):
     })
     print("Object properties: ", obj_name_out, size_name)
     # Rotate objects on axis of central sphere before placing next object
-    # Create a parent
+    # Create a parent and add children
     parent_object = blender_objects[0]
+    bpy.context.object.rotation_mode = 'QUATERNION'
     
     if (len(positions) > 1 and obj.type == "MESH"):
       obj.select = True
       parent_object.select = True
       obj.parent = parent_object
-      parent_object.matrix_parent_inverse = obj.matrix_world.inverted()
-      # print("Parent and child: ", parent_object, obj)
-    rot_angle = 360.0 / (float(num_objects - 1))  # to have some overlap between objects
-    # print("Rotation angle and nb_objects: ", rot_angle, num_objects)
-    bpy.ops.transform.rotate(value=rot_angle)
+      obj.matrix_parent_inverse = parent_object.matrix_world.inverted()
+
+    rot_angle_deg = 360.0 / (float(num_objects)) # to have some overlap between objects
+    rot_angle = (3.14159 * rot_angle_deg / 180 )  
+    # print("Rotated by: ", rot_angle - init_rot, " & rotation angle was: ", rot_angle)
+    init_rot = rot_angle
+    
+    # Info note: The quaternion axis of interest is indexed by bpy.data.objects['ObjName'].rotation_quaternion[3]
+    bpy.context.scene.objects.active = bpy.data.objects[parent_object.name]
+    bpy.context.object.rotation_quaternion[0] = bpy.context.object.rotation_quaternion[0] + rot_angle
+    # print("Quat angle: ", bpy.context.object.rotation_quaternion[0])
     parent_object.select = False  
     obj.select = False
     bpy.ops.object.select_all(action='DESELECT')
+
+    '''
+    TO DO: 
+    1. SOME OBJECTS GET COMPLETELY OCCLUDED BY SAME COLORED BIGGER OBJECTS AT TIMES. 
+    PLACE CONSTRAINTS TO PREVENT SAME COLOR DISKS COMPLETELY OCCLUDING EACH OTHER.
+    2. SAVE AND EXPORT OBJECTS IN .OBJ FORMAT FOR PIFU
+    3. CREATE SOME MORE RANDOM DISK CONFIGURATIONS
+    '''
 
   # Check that all objects are at least partially visible in the rendered image
   all_visible = check_visibility(blender_objects, args.min_pixels_per_object)
