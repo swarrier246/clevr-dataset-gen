@@ -113,11 +113,20 @@ parser.add_argument('--output_blend_dir', default='output/blendfiles',
          "user requested that these files be saved using the " +
          "--save_blendfiles flag; in this case it will be created if it does " +
          "not already exist.")
+parser.add_argument('--output_obj_dir', default='output/objfiles',
+    help="The directory where blender scene files will be stored, if the " +
+         "user requested that these files be saved using the " +
+         "--save_objfiles flag; in this case it will be created if it does " +
+         "not already exist.")
 parser.add_argument('--save_blendfiles', type=int, default=0,
     help="Setting --save_blendfiles 1 will cause the blender scene file for " +
          "each generated image to be stored in the directory specified by " +
          "the --output_blend_dir flag. These files are not saved by default " +
          "because they take up ~5-10MB each.")
+parser.add_argument('--save_objfiles', type=int, default=1,
+    help="Setting --save_objfiles 0 will cause blender scene file for each " +
+        "image to NOT be stored in the directory. These files are saved by " +
+        "default for use in neural net.")
 parser.add_argument('--version', default='1.0',
     help="String to store in the \"version\" field of the generated JSON file")
 parser.add_argument('--license',
@@ -163,9 +172,11 @@ def main(args):
   img_template = '%s%%0%dd.png' % (prefix, num_digits)
   scene_template = '%s%%0%dd.json' % (prefix, num_digits)
   blend_template = '%s%%0%dd.blend' % (prefix, num_digits)
+  obj_template = '%s%%0%dd.obj' % (prefix, num_digits)
   img_template = os.path.join(args.output_image_dir, img_template)
   scene_template = os.path.join(args.output_scene_dir, scene_template)
   blend_template = os.path.join(args.output_blend_dir, blend_template)
+  obj_template = os.path.join(args.output_obj_dir, obj_template)
 
 
   if not os.path.isdir(args.output_image_dir):
@@ -174,6 +185,8 @@ def main(args):
     os.makedirs(args.output_scene_dir)
   if args.save_blendfiles == 1 and not os.path.isdir(args.output_blend_dir):
     os.makedirs(args.output_blend_dir)
+  if args.save_objfiles == 1 and not os.path.isdir(args.output_obj_dir):
+    os.makedirs(args.output_obj_dir)
   
   all_scene_paths = []
   for i in range(args.num_images):
@@ -181,8 +194,11 @@ def main(args):
     scene_path = scene_template % (i + args.start_idx)
     all_scene_paths.append(scene_path)
     blend_path = None
+    obj_path = None
     if args.save_blendfiles == 1:
       blend_path = blend_template % (i + args.start_idx)
+    if args.save_objfiles == 1:
+      obj_path = obj_template % (i + args.start_idx)
     num_objects = random.randint(args.min_objects, args.max_objects)
     render_scene(args,
       num_objects=num_objects,
@@ -191,6 +207,7 @@ def main(args):
       output_image=img_path,
       output_scene=scene_path,
       output_blendfile=blend_path,
+      output_objfile=obj_path
     )
 
   # After rendering all images, combine the JSON files for each scene into a
@@ -263,7 +280,11 @@ def render_scene(args,
     output_image='render.png',
     output_scene='render_json',
     output_blendfile=None,
+    output_objfile=None
   ):
+
+  # TEST CASE: PLace one object only
+  # num_objects = 1
 
   # Load the main blendfile
   bpy.ops.wm.open_mainfile(filepath=args.base_scene_blendfile)
@@ -373,10 +394,8 @@ def render_scene(args,
     bpy.context.scene.objects[ob.name].select = True
     bpy.ops.object.group_link(group="meshGroup")    
     bpy.context.scene.objects[ob.name].select = False
-
-  # bpy.ops.object.select_all(action='SELECT')
-  # bpy.ops.group.create(name="Group")
-  print("selected objects: ", bpy.data.groups['meshGroup'].objects[0])
+  
+  bpy.ops.export_scene.obj(filepath=output_objfile)
 
   # Render the scene and dump the scene data structure
   scene_struct['objects'] = objects
@@ -395,7 +414,12 @@ def render_scene(args,
 
   if output_blendfile is not None:
     bpy.ops.wm.save_as_mainfile(filepath=output_blendfile)
+  # if output_objfile is not None:
+  #   bpy.ops.wm.save_as_mainfile(filepath=output_objfile)
 
+'''
+Moving some functions from render_images_custom here for ease in code usage
+'''
 
 def add_random_objects(scene_struct, num_objects, args, camera):
   """
@@ -411,10 +435,15 @@ def add_random_objects(scene_struct, num_objects, args, camera):
       color_name_to_rgba[name] = rgba
     material_mapping = [(v, k) for k, v in properties['materials'].items()]
     object_mapping = [(v, k) for k, v in properties['shapes'].items()]
+    
+
+    # Choose between disks.blend and leaf.obj
+    leaf_disk = False
     leaf_properties = properties['shapes'].copy()
     leaf_properties.pop('sphere')
     leaf_obj_mapping = [(v,k) for k,v in leaf_properties.items()]
     size_mapping = list(properties['sizes'].items())
+    print("size mapping: ", size_mapping)
 
   shape_color_combos = None
   if args.shape_color_combos_json is not None:
@@ -428,24 +457,132 @@ def add_random_objects(scene_struct, num_objects, args, camera):
   init_rot = 0
   size_name, r = random.choice(size_mapping)
   color_name, rgba = random.choice(list(color_name_to_rgba.items()))
+  orientation_range = []
+  # for i in range(25,45,3):
+  #   orientation_range.append(i)
+  #orientation_range = [25.0, 30.0, 35.0, 40.0, 45.0, 50.0]  #leaf orientation ranges
+  # print(orientation_range)
 
-  # Place first disk near the centre of the sphere
+  '''
+  WORKFLOW: First select nb of rows - 1 being bottom-most
+  For each row, select nb of leaves - each row has a tilt angle that's a function of the row
+  For each leaf, select angular position of leaf around z-axis. ensure leaves don't fully overlap
+  '''
+  nb_rows = random.randint(1,3)
+  
+  # TEST CASE: 
+  nb_rows = 4
+   
+  size_map_sorted = sorted(size_mapping, key = lambda x:x[1])
+  size_map_sorted.reverse()
+
+  # Position of leaves
+  x = 0.0
+  y = 0.0
+
+  for row in range(nb_rows):
+    # For each row pick nb of leaves
+    nb_leaves_per_row = random.randint(3,7) 
+
+    # TEST CASE:
+    #nb_leaves_per_row = 4  # nb_leaves + 1 (coz sphere) --> change
+
+    for i in range(nb_leaves_per_row):
+
+      theta = math.pi*(random.choice(list(np.arange(row*20, (row+1)*20, 0.5))))/180 # lower leaves are less tilted
+
+      # Pick largest leaves for lowest rows, and decrease leaf size as rows increase (may need to be modified for more randomness)
+      #size_name, r = size_map_sorted[row]
+      size_name, r = random.choice(size_mapping)
+      color_name, rgba = random.choice(list(color_name_to_rgba.items()))
+      if not positions:
+        z = r
+        obj_name_out = str('sphere')
+        obj_name = properties['shapes']['sphere']
+      else:
+        z = 0.0        
+        if leaf_disk == True:
+          obj_name, obj_name_out = random.choice(leaf_obj_mapping)
+        else:
+          obj_name_out = str('leaf')
+          obj_name = str('leaf')
+      # Actually add the object to the scene
+      utils.add_object(args.shape_dir, obj_name, r, (x, y,z), theta=theta)
+      obj = bpy.context.object
+      blender_objects.append(obj)
+      positions.append((x, y, r))
+
+      # TEST CASE: CHECK ORIENTATION
+      print("theta: ", theta, " for obj: ", obj)
+
+      # Attach a random material
+      mat_name, mat_name_out = random.choice(material_mapping)
+      utils.add_material(mat_name, Color=rgba)
+      # Attach a random material
+      mat_name, mat_name_out = random.choice(material_mapping)
+      utils.add_material(mat_name, Color=rgba)
+
+      # Record data about the object in the scene data structure
+      pixel_coords = utils.get_camera_coords(camera, obj.location)
+      objects.append({
+        'shape': obj_name_out,
+        'size': size_name,
+        'material': mat_name_out,
+        '3d_coords': tuple(obj.location),
+        'rotation': theta,
+        'pixel_coords': pixel_coords,
+        'color': color_name,
+      })
+
+      # Rotate objects on axis of central sphere before placing next object
+      # Create a parent and add children
+      parent_object = blender_objects[0]
+      bpy.context.object.rotation_mode = 'XYZ'
+      
+      if (len(positions) > 1 and obj.type == "MESH"):
+        obj.select = True
+        parent_object.select = True
+        obj.parent = parent_object
+        obj.matrix_parent_inverse = parent_object.matrix_world.inverted()
+
+      rot_angle_deg = 360.0 / (float(nb_leaves_per_row-1)) # to have some overlap between objects
+      rot_angle = (3.14159 * rot_angle_deg / 180 )  
+      # print("Rotated by: ", rot_angle - init_rot, " & rotation angle was: ", rot_angle)
+      init_rot = rot_angle
+    
+      # Info note: The quaternion axis of interest is indexed by bpy.data.objects['ObjName'].rotation_quaternion[3]
+      bpy.context.scene.objects.active = bpy.data.objects[parent_object.name]
+      bpy.context.object.rotation_euler[2] = bpy.context.object.rotation_euler[2] + rot_angle
+      # print("Quat angle: ", bpy.context.object.rotation_quaternion[0])
+      parent_object.select = False  
+      obj.select = False
+      bpy.ops.object.select_all(action='DESELECT')
+
+
+
+  ''' 
+  # Place first peripheral near the centre of the sphere
   for i in range(num_objects):
-    # Choose orientation 0 for the object.
+    # Choose size, color and orientation for objects
     size_name, r = random.choice(size_mapping)
     color_name, rgba = random.choice(list(color_name_to_rgba.items())) 
-    theta = 30.0
+    theta = random.choice(orientation_range)
+    # theta = 30.0
     if not positions:
       x = 0.0
       y = 0.0
       obj_name_out = str('sphere')
       obj_name = properties['shapes']['sphere']
     else:
-      pos_y = np.arange(-(1+(1.2*r)), -1.2*r, 0.1) + np.arange(1.2*r, (1+(1.2*r)), 0.1)
-      pos_x = np.arange(1.2*r, (1+(1.2*r)), 0.1)
+      pos_y = np.arange(-(1+(0.7*r)), -0.7*r, 0.1) + np.arange(0.7*r, (1+(0.7*r)), 0.1)  #prev value 1.2
+      pos_x = np.arange(0.7*r, (1+(0.7*r)), 0.1)
       x = random.choice(pos_x)
       y = random.choice(pos_y)
-      obj_name, obj_name_out = random.choice(leaf_obj_mapping)
+      if leaf_disk == True:
+        obj_name, obj_name_out = random.choice(leaf_obj_mapping)
+      else:
+        obj_name_out = str('leaf')
+        obj_name = str('leaf')
 
       # TEST CASE: Place single object:
       # obj_name_out = str('disk')
@@ -473,7 +610,7 @@ def add_random_objects(scene_struct, num_objects, args, camera):
       'pixel_coords': pixel_coords,
       'color': color_name,
     })
-    print("Object properties: ", obj_name_out, size_name)
+    print("Object properties: ", obj_name_out, size_name, mat_name_out, color_name)
     # Rotate objects on axis of central sphere before placing next object
     # Create a parent and add children
     parent_object = blender_objects[0]
@@ -498,18 +635,18 @@ def add_random_objects(scene_struct, num_objects, args, camera):
     obj.select = False
     bpy.ops.object.select_all(action='DESELECT')
 
-    '''
     TO DO: 
     1. SOME OBJECTS GET COMPLETELY OCCLUDED BY SAME COLORED BIGGER OBJECTS AT TIMES. 
     PLACE CONSTRAINTS TO PREVENT SAME COLOR DISKS COMPLETELY OCCLUDING EACH OTHER.
-    2. SAVE AND EXPORT OBJECTS IN .OBJ FORMAT FOR PIFU
-    3. CREATE SOME MORE RANDOM DISK CONFIGURATIONS
+    2. CREATE SOME MORE RANDOM DISK CONFIGURATIONS AND NARROW EXISTING DISKS, OR
+    3. LOAD .OBJ LEAF FILE
     '''
 
   # Check that all objects are at least partially visible in the rendered image
   all_visible = check_visibility(blender_objects, args.min_pixels_per_object)
 
   return objects, blender_objects
+
 
 def compute_all_relationships(scene_struct, eps=0.2):
   """
