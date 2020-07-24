@@ -11,6 +11,8 @@ from datetime import datetime as dt
 from collections import Counter
 import numpy as np
 from math import isclose
+import bmesh
+import statistics
 from mathutils import Matrix, Vector, Quaternion
 
 """
@@ -92,8 +94,8 @@ parser.add_argument('--start_idx', default=0, type=int,
     help="The index at which to start for numbering rendered images. Setting " +
          "this to non-zero values allows you to distribute rendering across " +
          "multiple machines and recombine the results later.")
-parser.add_argument('--num_images', default=5, type=int,
-    help="The number of images to render")
+parser.add_argument('--num_scenes', default=5, type=int,
+    help="The number of scenes to render")
 parser.add_argument('--filename_prefix', default='CLEVR',
     help="This prefix will be prepended to the rendered images and JSON scenes")
 parser.add_argument('--split', default='new',
@@ -168,12 +170,16 @@ parser.add_argument('--render_tile_size', default=256, type=int,
 
 def main(args):
   num_digits = 6
-  prefix = '%s_%s_' % (args.filename_prefix, args.split)
-  img_template = '%s%%0%dd.png' % (prefix, num_digits)
+  prefix = '{}_{}'.format(args.filename_prefix, args.split)
+  img_template = '%%0%dd.png' % (num_digits)  # file name 
+  img_id = '%s%%0%dd' % (prefix, num_digits)  # folder name
   scene_template = '%s%%0%dd.json' % (prefix, num_digits)
   blend_template = '%s%%0%dd.blend' % (prefix, num_digits)
-  obj_template = '%s%%0%dd.obj' % (prefix, num_digits)
-  img_template = os.path.join(args.output_image_dir, img_template)
+  obj_template = '%s%%0%dd' % (prefix, num_digits)  # folder name for obj files for each scene
+  # single_img_template = os.path.join(args.output_image_dir, img_id, img_template)  # template for filepath for each scene
+  single_img_template = img_template
+  print("single img: ", single_img_template, "& obj template: ", obj_template)
+  img_template = os.path.join(args.output_image_dir, img_id)   # template for folderpath for scenes
   scene_template = os.path.join(args.output_scene_dir, scene_template)
   blend_template = os.path.join(args.output_blend_dir, blend_template)
   obj_template = os.path.join(args.output_obj_dir, obj_template)
@@ -189,8 +195,14 @@ def main(args):
     os.makedirs(args.output_obj_dir)
   
   all_scene_paths = []
-  for i in range(args.num_images):
-    img_path = img_template % (i + args.start_idx)
+  vol_list = []
+  num_images_per_scene = 10
+
+  for i in range(args.num_scenes):
+    # for j in range(num_images_per_scene):
+    img_path = single_img_template  # only the filename. Needs os.path.join in the render_scene function
+    print("img path: ", img_path)
+    folder_path = img_template  % (i + args.start_idx)
     scene_path = scene_template % (i + args.start_idx)
     all_scene_paths.append(scene_path)
     blend_path = None
@@ -199,16 +211,21 @@ def main(args):
       blend_path = blend_template % (i + args.start_idx)
     if args.save_objfiles == 1:
       obj_path = obj_template % (i + args.start_idx)
+    print("obj path: ", obj_path)
     num_objects = random.randint(args.min_objects, args.max_objects)
-    render_scene(args,
+    # Get volume of objs in each scene    
+    vol_objs = render_scene(args,
       num_objects=num_objects,
       output_index=(i + args.start_idx),
       output_split=args.split,
-      output_image=img_path,
+      output_image=img_path,   # img path being given here is the single image template. The format int placement will be in function itself
+      output_folder=folder_path,
       output_scene=scene_path,
       output_blendfile=blend_path,
-      output_objfile=obj_path
+      output_obj_folder=obj_path,
+      num_imgs_per_scene=num_images_per_scene
     )
+    vol_list.append(vol_objs)
 
   # After rendering all images, combine the JSON files for each scene into a
   # single JSON file.
@@ -228,6 +245,11 @@ def main(args):
   with open(args.output_scene_file, 'w') as f:
     json.dump(output, f)
 
+  print("Volume of scenes in dataset: ", vol_list)
+  if len(vol_list) > 2:
+    std_dev = get_std_deviation_volume(vol_list) # std deviation across dataset
+    print("Std deviation: ", std_dev)
+
 def _register_meshes():
   # Register all mesh objects together to group later
   meshes = []
@@ -235,6 +257,36 @@ def _register_meshes():
     if obj.type == "MESH":
       meshes.append(obj)
   return meshes
+
+def config_cam(azimuth, elevation, dist, tilt=0):
+    """
+    Author: Amit Raj
+    Utility function to generate camera location and rotation Vectors    
+    Parameters:
+      azimuth: float
+          Azimuth angle in radians
+      elevation: float
+          Elevation angle in radians
+      dist : float
+          Distance of viewing sphere
+      tilt : float
+          In Plane rotation in radians    
+    Returns:
+      location : mathutils.Vector
+          Camera location setting
+      rotation : mathutils.Vector
+          Camera rotation setting
+    """    
+    z = dist * np.sin(elevation)
+    y = -dist * np.cos(azimuth) * np.cos(elevation)
+    x = dist * np.sin(azimuth) * np.cos(elevation)    
+    location = Vector((x, y, z))   
+    xr = np.pi / 2 - elevation
+    yr = tilt
+    zr = azimuth    
+    rotation = Vector((xr, yr, zr))    
+    return location, rotation
+
 
 def convert_to_array(matrix_obj):
   ''' Input: 3x3 matrix from mathutils
@@ -244,6 +296,24 @@ def convert_to_array(matrix_obj):
   print(array)
   return array
 
+
+def get_mesh_from_obj(ob):
+  matrix = ob.matrix_world
+  ob_mesh = ob.to_mesh(bpy.context.scene, apply_modifiers=True, settings='PREVIEW')
+  ob_mesh.transform(matrix)
+  # ob_mesh = ob.data
+  bm = bmesh.new()
+  bm.from_mesh(ob_mesh)
+  bpy.data.meshes.remove(ob_mesh)
+  # TEST CASE: for testing alternative approach
+  # is_neg = False
+  return bm, matrix.is_negative
+
+def get_std_deviation_volume(vol):
+  # Standard deviation of volumes across dataset
+  # Input: vol(list)- list of scene volumes of all images in dataset
+  std_deviation = statistics.stdev(vol)
+  return std_deviation
 
 '''
 Rotation function; Reference: https://devtalk.blender.org/t/bpy-ops-transform-rotate-option-axis/6235
@@ -278,11 +348,16 @@ def render_scene(args,
     output_index=0,
     output_split='none',
     output_image='render.png',
+    output_folder='render',
     output_scene='render_json',
     output_blendfile=None,
-    output_objfile=None
+    output_obj_folder=None,
+    num_imgs_per_scene=60
   ):
-
+  
+  if not os.path.isdir(output_obj_folder):
+    os.makedirs(output_obj_folder)
+  
   # TEST CASE: PLace one object only
   # num_objects = 1
 
@@ -327,6 +402,7 @@ def render_scene(args,
       'split': output_split,
       'image_index': output_index,
       'image_filename': os.path.basename(output_image),
+      'image_folder': os.path.basename(output_folder),
       'objects': [],
       'directions': {},
   }
@@ -337,15 +413,19 @@ def render_scene(args,
 
   def rand(L):
     return 2.0 * L * (random.random() - 0.5)
+  
+  # Get camera location and rotation to move in a 'viewing sphere' per scene
+  camera = bpy.data.objects["Camera"]            # Sample random Azimuth and elevation
 
-  # Add random jitter to camera position
-  if args.camera_jitter > 0:
-    for i in range(3):
-      bpy.data.objects['Camera'].location[i] += rand(args.camera_jitter)
+ 
+  # # Add random jitter to camera position
+  # if args.camera_jitter > 0:
+  #   for i in range(3):
+  #     bpy.data.objects['Camera'].location[i] += rand(args.camera_jitter)
 
   # Figure out the left, up, and behind directions along the plane and record
   # them in the scene structure
-  camera = bpy.data.objects['Camera']
+  # camera = bpy.data.objects['Camera']
   plane_normal = plane.data.vertices[0].normal
   cam_behind = camera.matrix_world.to_quaternion() * Vector((0, 0, -1))
   cam_left = camera.matrix_world.to_quaternion() * Vector((-1, 0, 0))
@@ -379,6 +459,7 @@ def render_scene(args,
 
   # Now make some random objects
   objects, blender_objects = add_random_objects(scene_struct, num_objects, args, camera)
+  # Objects is a dict of scene obj properties(shape, color, etc) and blender_objects is a list of mesh objects in scene
 
   # We want objects in .obj format, for PIFu: for this, we group rendered objects 
   # together and save geometry to .obj. However, this also groups the ground plane
@@ -387,39 +468,75 @@ def render_scene(args,
   # Delete ground plane, to make grouping for .obj easier
   utils.delete_object(ground_plane)
   
+  vol, vol_obj = 0.0, 0.0
   # Group together meshes
   bpy.ops.group.create(name="meshGroup")
   mesh_list = _register_meshes()
   for ob in mesh_list:
     bpy.context.scene.objects[ob.name].select = True
-    bpy.ops.object.group_link(group="meshGroup")    
-    bpy.context.scene.objects[ob.name].select = False
+    bpy.ops.object.group_link(group="meshGroup") 
+    bm, is_negative = get_mesh_from_obj(ob)
+    bpy.context.scene.objects[ob.name].select = False  
   
-  bpy.ops.export_scene.obj(filepath=output_objfile)
+    
+    vol_obj = bm.calc_volume(signed=True)  # Get volume for a single object
+    print("debugging vol func: ", vol_obj, " for is_neg flag: ", is_negative)
+    if is_negative:
+        vol_obj = -vol_obj
+    bm.free()
+    vol += vol_obj
+  
+  print("Volume of scene: ", vol)
+  # At the end of this, the central sphere is the active object, as seen by bpy.context.object
+  # Camera viewing angles
+  target_obj = bpy.context.object
+  target_loc_x, target_loc_y = target_obj.location.x, target_obj.location.y
+  cam_loc_x, cam_loc_y = camera.location.x, camera.location.y
+  base_dist = (target_obj.location.xy-camera.location.xy).length
 
-  # Render the scene and dump the scene data structure
-  scene_struct['objects'] = objects
-  scene_struct['relationships'] = compute_all_relationships(scene_struct)
-  while True:
-    try:
-      bpy.ops.render.render(write_still=True)
-      break
-    except Exception as e:
-      print(e)
+  # TRIAL RUN:
+  # ISSUES: All files getting saved in one folder
+  # viewing sphere seems to be around z-axis, instead of whatever we want
+  # files getting saved on top of each other - 3 views of same scene overwriting each other
+  for j in range(num_imgs_per_scene):
+    img = os.path.join(output_folder, output_image) % j
+    render_args.filepath = img
+    print("render args filepath: ", output_folder, " joined: ", img)
+    t = np.random.rand()
+    # t = 0.5
+    azimuth = 180 + (-180 * t + (1 - t) * 180)
+    elevation = 25 * t + (1 - t) * 45            # Jitter the viewing sphere
+    jitter_t = np.random.rand()
+    jitter = -args.camera_jitter * (1 - jitter_t) + jitter_t * args.camera_jitter
+    dist = base_dist + jitter            
+    location, rotation = config_cam(
+        math.radians(azimuth), math.radians(elevation), dist
+    )            
+    camera.location = location
+    camera.rotation_euler = rotation
+      # Render the scene and dump the scene data structure
+    scene_struct['objects'] = objects
+    scene_struct['relationships'] = compute_all_relationships(scene_struct)
+    while True:
+      try:
+        bpy.ops.render.render(write_still=True)
+        break
+      except Exception as e:
+        print(e)
 
-  with open(output_scene, 'w') as f:
-    json.dump(scene_struct, f, indent=2)
+    obj_file_template = '%%0%dd.obj' % 6  # num_digits hardcoded here
+    print(" export scene obj path: ", os.path.join(output_obj_folder, obj_file_template) % j)
+    bpy.ops.export_scene.obj(filepath=os.path.join(output_obj_folder, obj_file_template) % j)
 
-  bpy.ops.object.select_all(action='DESELECT')
+    with open(output_scene, 'w') as f:
+      json.dump(scene_struct, f, indent=2)
 
-  if output_blendfile is not None:
-    bpy.ops.wm.save_as_mainfile(filepath=output_blendfile)
-  # if output_objfile is not None:
-  #   bpy.ops.wm.save_as_mainfile(filepath=output_objfile)
+    bpy.ops.object.select_all(action='DESELECT')
 
-'''
-Moving some functions from render_images_custom here for ease in code usage
-'''
+    if output_blendfile is not None:
+      bpy.ops.wm.save_as_mainfile(filepath=output_blendfile)
+  
+  return vol
 
 def add_random_objects(scene_struct, num_objects, args, camera):
   """
@@ -457,11 +574,6 @@ def add_random_objects(scene_struct, num_objects, args, camera):
   init_rot = 0
   size_name, r = random.choice(size_mapping)
   color_name, rgba = random.choice(list(color_name_to_rgba.items()))
-  orientation_range = []
-  # for i in range(25,45,3):
-  #   orientation_range.append(i)
-  #orientation_range = [25.0, 30.0, 35.0, 40.0, 45.0, 50.0]  #leaf orientation ranges
-  # print(orientation_range)
 
   '''
   WORKFLOW: First select nb of rows - 1 being bottom-most
@@ -471,7 +583,7 @@ def add_random_objects(scene_struct, num_objects, args, camera):
   nb_rows = random.randint(1,3)
   
   # TEST CASE: 
-  nb_rows = 4
+  # nb_rows = 4
    
   size_map_sorted = sorted(size_mapping, key = lambda x:x[1])
   size_map_sorted.reverse()
@@ -530,7 +642,7 @@ def add_random_objects(scene_struct, num_objects, args, camera):
         'material': mat_name_out,
         '3d_coords': tuple(obj.location),
         'rotation': theta,
-        'pixel_coords': pixel_coords,
+        'pixel_coords': pixel_coords,   
         'color': color_name,
       })
 
@@ -550,97 +662,12 @@ def add_random_objects(scene_struct, num_objects, args, camera):
       # print("Rotated by: ", rot_angle - init_rot, " & rotation angle was: ", rot_angle)
       init_rot = rot_angle
     
-      # Info note: The quaternion axis of interest is indexed by bpy.data.objects['ObjName'].rotation_quaternion[3]
+      # Info note: The axis of interest is indexed by bpy.data.objects['ObjName'].rotation_euler[2]
       bpy.context.scene.objects.active = bpy.data.objects[parent_object.name]
       bpy.context.object.rotation_euler[2] = bpy.context.object.rotation_euler[2] + rot_angle
-      # print("Quat angle: ", bpy.context.object.rotation_quaternion[0])
       parent_object.select = False  
       obj.select = False
       bpy.ops.object.select_all(action='DESELECT')
-
-
-
-  ''' 
-  # Place first peripheral near the centre of the sphere
-  for i in range(num_objects):
-    # Choose size, color and orientation for objects
-    size_name, r = random.choice(size_mapping)
-    color_name, rgba = random.choice(list(color_name_to_rgba.items())) 
-    theta = random.choice(orientation_range)
-    # theta = 30.0
-    if not positions:
-      x = 0.0
-      y = 0.0
-      obj_name_out = str('sphere')
-      obj_name = properties['shapes']['sphere']
-    else:
-      pos_y = np.arange(-(1+(0.7*r)), -0.7*r, 0.1) + np.arange(0.7*r, (1+(0.7*r)), 0.1)  #prev value 1.2
-      pos_x = np.arange(0.7*r, (1+(0.7*r)), 0.1)
-      x = random.choice(pos_x)
-      y = random.choice(pos_y)
-      if leaf_disk == True:
-        obj_name, obj_name_out = random.choice(leaf_obj_mapping)
-      else:
-        obj_name_out = str('leaf')
-        obj_name = str('leaf')
-
-      # TEST CASE: Place single object:
-      # obj_name_out = str('disk')
-      # obj_name = properties['shapes']['disk']
-      # print("x, y: ", x,y)
-
-    # Actually add the object to the scene
-    utils.add_object(args.shape_dir, obj_name, r, (x, y), theta=theta)
-    obj = bpy.context.object
-    blender_objects.append(obj)
-    positions.append((x, y, r))
-
-    # Attach a random material
-    mat_name, mat_name_out = random.choice(material_mapping)
-    utils.add_material(mat_name, Color=rgba)
-
-    # Record data about the object in the scene data structure
-    pixel_coords = utils.get_camera_coords(camera, obj.location)
-    objects.append({
-      'shape': obj_name_out,
-      'size': size_name,
-      'material': mat_name_out,
-      '3d_coords': tuple(obj.location),
-      'rotation': theta,
-      'pixel_coords': pixel_coords,
-      'color': color_name,
-    })
-    print("Object properties: ", obj_name_out, size_name, mat_name_out, color_name)
-    # Rotate objects on axis of central sphere before placing next object
-    # Create a parent and add children
-    parent_object = blender_objects[0]
-    bpy.context.object.rotation_mode = 'QUATERNION'
-    
-    if (len(positions) > 1 and obj.type == "MESH"):
-      obj.select = True
-      parent_object.select = True
-      obj.parent = parent_object
-      obj.matrix_parent_inverse = parent_object.matrix_world.inverted()
-
-    rot_angle_deg = 360.0 / (float(num_objects)) # to have some overlap between objects
-    rot_angle = (3.14159 * rot_angle_deg / 180 )  
-    # print("Rotated by: ", rot_angle - init_rot, " & rotation angle was: ", rot_angle)
-    init_rot = rot_angle
-    
-    # Info note: The quaternion axis of interest is indexed by bpy.data.objects['ObjName'].rotation_quaternion[3]
-    bpy.context.scene.objects.active = bpy.data.objects[parent_object.name]
-    bpy.context.object.rotation_quaternion[0] = bpy.context.object.rotation_quaternion[0] + rot_angle
-    # print("Quat angle: ", bpy.context.object.rotation_quaternion[0])
-    parent_object.select = False  
-    obj.select = False
-    bpy.ops.object.select_all(action='DESELECT')
-
-    TO DO: 
-    1. SOME OBJECTS GET COMPLETELY OCCLUDED BY SAME COLORED BIGGER OBJECTS AT TIMES. 
-    PLACE CONSTRAINTS TO PREVENT SAME COLOR DISKS COMPLETELY OCCLUDING EACH OTHER.
-    2. CREATE SOME MORE RANDOM DISK CONFIGURATIONS AND NARROW EXISTING DISKS, OR
-    3. LOAD .OBJ LEAF FILE
-    '''
 
   # Check that all objects are at least partially visible in the rendered image
   all_visible = check_visibility(blender_objects, args.min_pixels_per_object)

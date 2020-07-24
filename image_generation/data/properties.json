@@ -3,7 +3,8 @@
     "inclinedcylinder": "SmoothLowCylinderInclined",
     "flat": "SmoothLowCylinderInclined_flat",
     "sphere": "Sphere",
-    "disk": "SmoothDisk_highIncline"
+    "disk": "SmoothDisk_highIncline",
+    "leaf": "leaf"
   },
   "colors": {
     "gray": [87, 87, 87],
