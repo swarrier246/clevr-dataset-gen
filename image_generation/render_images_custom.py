@@ -143,9 +143,9 @@ parser.add_argument('--use_gpu', default=0, type=int,
     help="Setting --use_gpu 1 enables GPU-accelerated rendering using CUDA. " +
          "You must have an NVIDIA GPU with the CUDA toolkit installed for " +
          "to work.")
-parser.add_argument('--width', default=320, type=int,
+parser.add_argument('--width', default=256, type=int,
     help="The width (in pixels) for the rendered images")
-parser.add_argument('--height', default=240, type=int,
+parser.add_argument('--height', default=256, type=int,
     help="The height (in pixels) for the rendered images")
 parser.add_argument('--key_light_jitter', default=1.0, type=float,
     help="The magnitude of random jitter to add to the key light position.")
@@ -196,7 +196,7 @@ def main(args):
   
   all_scene_paths = []
   vol_list = []
-  num_images_per_scene = 10
+  num_images_per_scene = 50
 
   for i in range(args.num_scenes):
     # for j in range(num_images_per_scene):
@@ -498,15 +498,16 @@ def render_scene(args,
   # ISSUES: All files getting saved in one folder
   # viewing sphere seems to be around z-axis, instead of whatever we want
   # files getting saved on top of each other - 3 views of same scene overwriting each other
+  t_list = np.linspace(0,1,num_imgs_per_scene)
   for j in range(num_imgs_per_scene):
     img = os.path.join(output_folder, output_image) % j
     render_args.filepath = img
     print("render args filepath: ", output_folder, " joined: ", img)
-    t = np.random.rand()
+    t = t_list[j]
     # t = 0.5
-    azimuth = 180 + (-180 * t + (1 - t) * 180)
-    elevation = 25 * t + (1 - t) * 45            # Jitter the viewing sphere
-    jitter_t = np.random.rand()
+    azimuth = 180 + (-180 * t + (1 - t) * 180)  # range of azimuth: 0-360 deg
+    elevation = 15 * t + (1 - t) * 75        # range of elevation: 15-75 deg    
+    jitter_t = np.random.rand()   # Jitter the viewing sphere
     jitter = -args.camera_jitter * (1 - jitter_t) + jitter_t * args.camera_jitter
     dist = base_dist + jitter            
     location, rotation = config_cam(
