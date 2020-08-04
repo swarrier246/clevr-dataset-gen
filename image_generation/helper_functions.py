@@ -19,5 +19,5 @@ def create_gif(base_folder):
                save_all=True, append_images=img_list[1:], optimize=False, duration=120, loop=0)
 
 if __name__ == "__main__":
-    base_folder = '/home/sushmitawarrier/clevr-dataset-gen/output/images/CLEVR_new000000'
+    base_folder = '/home/sushmitawarrier/clevr-dataset-gen/output/images/CLEVR_new000001'
     create_gif(base_folder)

@@ -504,12 +504,11 @@ def render_scene(args,
     render_args.filepath = img
     print("render args filepath: ", output_folder, " joined: ", img)
     t = t_list[j]
-    # t = 0.5
     azimuth = 180 + (-180 * t + (1 - t) * 180)  # range of azimuth: 0-360 deg
     elevation = 15 * t + (1 - t) * 75        # range of elevation: 15-75 deg    
-    jitter_t = np.random.rand()   # Jitter the viewing sphere
-    jitter = -args.camera_jitter * (1 - jitter_t) + jitter_t * args.camera_jitter
-    dist = base_dist + jitter            
+    #jitter_t = np.random.rand()   # Jitter the viewing sphere
+    #jitter = -args.camera_jitter * (1 - jitter_t) + jitter_t * args.camera_jitter
+    dist = base_dist # + jitter            
     location, rotation = config_cam(
         math.radians(azimuth), math.radians(elevation), dist
     )            
