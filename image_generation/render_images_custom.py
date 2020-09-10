@@ -13,6 +13,7 @@ import numpy as np
 from math import isclose
 import bmesh
 import statistics
+from helper_functions import get_camera_matrix
 from mathutils import Matrix, Vector, Quaternion
 
 """
@@ -415,8 +416,10 @@ def render_scene(args,
     return 2.0 * L * (random.random() - 0.5)
   
   # Get camera location and rotation to move in a 'viewing sphere' per scene
-  camera = bpy.data.objects["Camera"]            # Sample random Azimuth and elevation
-
+  camera = bpy.data.objects["Camera"]  
+  angle_x = camera.data.angle_x  
+  transforms = dict()
+  transforms.update({"camera_angle_x": angle_x})
  
   # # Add random jitter to camera position
   # if args.camera_jitter > 0:
@@ -490,31 +493,40 @@ def render_scene(args,
   # At the end of this, the central sphere is the active object, as seen by bpy.context.object
   # Camera viewing angles
   target_obj = bpy.context.object
-  target_loc_x, target_loc_y = target_obj.location.x, target_obj.location.y
-  cam_loc_x, cam_loc_y = camera.location.x, camera.location.y
   base_dist = (target_obj.location.xy-camera.location.xy).length
 
-  # TRIAL RUN:
-  # ISSUES: All files getting saved in one folder
-  # viewing sphere seems to be around z-axis, instead of whatever we want
-  # files getting saved on top of each other - 3 views of same scene overwriting each other
   t_list = np.linspace(0,1,num_imgs_per_scene)
+  # Generate frames (list of dictionaries) for transforms. json file (nerf)
+  frames = []
   for j in range(num_imgs_per_scene):
     img = os.path.join(output_folder, output_image) % j
-    render_args.filepath = img
-    print("render args filepath: ", output_folder, " joined: ", img)
+    render_args.filepath = img   # absolute file path for output img being rendered 
+    # print("render args filepath: ", output_folder, " joined: ", img)
     t = t_list[j]
     azimuth = 180 + (-180 * t + (1 - t) * 180)  # range of azimuth: 0-360 deg
     elevation = 15 * t + (1 - t) * 75        # range of elevation: 15-75 deg    
     #jitter_t = np.random.rand()   # Jitter the viewing sphere
     #jitter = -args.camera_jitter * (1 - jitter_t) + jitter_t * args.camera_jitter
-    dist = base_dist # + jitter            
+    dist = base_dist # + jitter   
+
+    transformation_matrix = get_camera_matrix(azimuth, elevation, dist)
+    
+    # create dictionary to append to frames
+    img_name = img.split('.')
+    img_name = img_name[:-1][-1]
+    scene_tranformation_dict = dict()
+    scene_tranformation_dict = {"file_path": img_name, "rotation": np.random.random(), "transform_matrix": transformation_matrix.tolist()}
+    print("scene transformation dict", scene_tranformation_dict)
+    frames.append(scene_tranformation_dict)
+
+    # set camera location and rotation  
     location, rotation = config_cam(
         math.radians(azimuth), math.radians(elevation), dist
-    )            
+    )       
     camera.location = location
     camera.rotation_euler = rotation
-      # Render the scene and dump the scene data structure
+
+    # Render the scene and dump the scene data structure
     scene_struct['objects'] = objects
     scene_struct['relationships'] = compute_all_relationships(scene_struct)
     while True:
@@ -536,6 +548,12 @@ def render_scene(args,
     if output_blendfile is not None:
       bpy.ops.wm.save_as_mainfile(filepath=output_blendfile)
   
+  # Update transforms dict with frame information and dump into json file
+  transforms.update({"frames": frames})
+  output_transform_file = os.path.join(output_folder,'transforms_train.json')
+  with open(output_transform_file, 'w') as outfile:
+      json.dump(transforms, outfile)
+    
   return vol
 
 def add_random_objects(scene_struct, num_objects, args, camera):
