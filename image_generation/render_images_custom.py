@@ -418,6 +418,8 @@ def render_scene(args,
   # Get camera location and rotation to move in a 'viewing sphere' per scene
   camera = bpy.data.objects["Camera"]  
   angle_x = camera.data.angle_x  
+  # printing camera parameters for debugging
+  print("camera sensor height: ", camera.data.sensor_height, ",camera sensor width: ", camera.data.sensor_width, ",camera focal length: ", camera.data.lens,",and camera angle_x (as used in NeRF): ", angle_x)
   transforms = dict()
   transforms.update({"camera_angle_x": angle_x})
  
@@ -550,8 +552,15 @@ def render_scene(args,
   
   # Update transforms dict with frame information and dump into json file
   transforms.update({"frames": frames})
-  output_transform_file = os.path.join(output_folder,'transforms_train.json')
-  with open(output_transform_file, 'w') as outfile:
+
+  # NeRF specific work
+  train_path = './train'
+  if os.path.isdir(train_path):
+    train_file = os.path.join(train_path, 'transforms_train.json')
+  else:
+      train_path = os.mkdir(train_path)
+      train_file = os.path.join(train_path, 'transforms_train.json')
+  with open(train_file, 'w') as outfile:
       json.dump(transforms, outfile)
     
   return vol
