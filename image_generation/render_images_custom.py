@@ -496,6 +496,7 @@ def render_scene(args,
   # Camera viewing angles
   target_obj = bpy.context.object
   base_dist = (target_obj.location.xy-camera.location.xy).length
+  print("base dist", base_dist)
 
   t_list = np.linspace(0,1,num_imgs_per_scene)
   # Generate frames (list of dictionaries) for transforms. json file (nerf)

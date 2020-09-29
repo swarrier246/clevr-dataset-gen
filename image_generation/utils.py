@@ -6,7 +6,7 @@
 # of patent rights can be found in the PATENTS file in the same directory.
 
 import sys, random, os
-import bpy, bpy_extras
+# import bpy, bpy_extras
 
 
 """
@@ -15,6 +15,7 @@ Some utility functions for interacting with Blender
 
 
 def extract_args(input_argv=None):
+  import bpy, bpy_extras
   """
   Pull out command-line arguments after "--". Blender ignores command-line flags
   after --, so this lets us forward command line arguments from the blender
@@ -35,6 +36,7 @@ def parse_args(parser, argv=None):
 
 # I wonder if there's a better way to do this?
 def delete_object(obj):
+  import bpy, bpy_extras
   """ Delete a specified blender object """
   for o in bpy.data.objects:
     o.select = False
@@ -55,6 +57,7 @@ def get_camera_coords(cam, pos):
   - (px, py, pz): px and py give 2D image-space coordinates; pz gives depth
     in the range [-1, 1]
   """
+  import bpy, bpy_extras
   scene = bpy.context.scene
   x, y, z = bpy_extras.object_utils.world_to_camera_view(scene, cam, pos)
   scale = scene.render.resolution_percentage / 100.0
@@ -84,6 +87,7 @@ def add_object_custom(object_dir, name, scale, loc, theta=0):
   - loc: tuple (x, y) giving the coordinates on the ground plane where the
     object should be placed.
   """
+  import bpy, bpy_extras
   # First figure out how many of this object are already in the scene so we can
   # give the new object a unique name
   count = 0
@@ -128,6 +132,7 @@ def add_object(object_dir, name, scale, loc, theta=0):
   - loc: tuple (x, y, z) giving the coordinates on the ground plane where the
     object should be placed.
   """
+  import bpy, bpy_extras
   # First figure out how many of this object are already in the scene so we can
   # give the new object a unique name
   count = 0
@@ -219,3 +224,38 @@ def add_material(name, **properties):
       output_node.inputs['Surface'],
   )
 
+class ObjLoader(object):
+  """
+  Class to read vertices and faces from .obj model
+  Author: Amit Raj
+  """
+  def __init__(self, fileName):
+      self.vertices = []
+      self.faces = []
+      ##
+      try:
+          f = open(fileName, 'rb')
+          for line in f:
+              if line[:2] == "v ":
+                index1 = line.find(" ") + 1
+                index2 = line.find(" ", index1 + 1)
+                index3 = line.find(" ", index2 + 1)                    
+                vertex = (float(line[index1:index2]), float(line[index2:index3]), float(line[index3:-1]))
+                vertex = (round(vertex[0], 2), round(vertex[1], 2), round(vertex[2], 2))
+                self.vertices.append(vertex)                
+              elif line[0] == "f":
+                string = line.replace("//", "/")
+                ##
+                i = string.find(" ") + 1
+                face = []
+                for item in range(string.count(" ")):
+                    if string.find(" ", i) == -1:
+                        face.append(string[i:-1])
+                        break
+                    face.append(string[i:string.find(" ", i)])
+                    i = string.find(" ", i) + 1
+                ##
+                self.faces.append(tuple(face))            
+          f.close()
+      except IOError:
+          print(".obj file not found.")
