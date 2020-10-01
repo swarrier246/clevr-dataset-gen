@@ -4,10 +4,44 @@ import os, sys, math #, cv2
 import numpy as np
 from PIL import Image
 from utils import ObjLoader
+from functools import partial
+from enum import Enum
 import bpy
 import bpy_extras
 from mathutils import Matrix
 from mathutils import Vector
+# from render_images_custom import config_cam
+
+
+
+# c2w generated based on nerf's load_blender.py
+trans_t = lambda t : np.array([[1,0,0,0],
+    [0,1,0,0],
+    [0,0,1,t],
+    [0,0,0,1]], dtype=np.float32)
+
+rot_phi = lambda phi : np.array([
+    [1,0,0,0],
+    [0,math.cos(phi),-math.sin(phi),0],
+    [0,math.sin(phi), math.cos(phi),0],
+    [0,0,0,1],
+], dtype=np.float32)
+
+rot_theta = lambda th : np.array([
+    [math.cos(th),0,-math.sin(th),0],
+    [0,1,0,0],
+    [math.sin(th),0, math.cos(th),0],
+    [0,0,0,1],
+], dtype=np.float32)
+
+def pose_spherical(theta, phi, radius):
+    c2w = trans_t(radius)
+    c2w = rot_phi(phi/180.*np.pi) @ c2w
+    c2w = rot_theta(theta/180.*np.pi) @ c2w
+    c2w = np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
+    return c2w
+
+
 #---------------------------------------------------------------
 # 3x4 P matrix from Blender camera
 #---------------------------------------------------------------
@@ -49,7 +83,8 @@ def get_calibration_matrix_K_from_blender(camd):
         ((alpha_u, skew,    u_0),
         (    0  , alpha_v, v_0),
         (    0  , 0,        1 )))
-    return K # Returns camera rotation and translation matrices from Blender.
+    return K 
+# Returns camera rotation and translation matrices from Blender.
 # 
 # There are 3 coordinate systems involved:
 #    1. The World coordinates: "world"
@@ -116,6 +151,7 @@ def get_3x4_P_matrix_from_blender(cam):
 
 def get_camera_matrix(az=0, ele=0, dist=0):
     """
+    Author: Amit Raj, Sushmita Warrier
     Camera-to-World transformation matrix from azimuth and elevation
     Args: az(float) - azimuth angle
     ele(float) - elevation angle
@@ -205,14 +241,23 @@ def save_scene_data(base_folder, focal_length, file_name='transforms_train', nb_
 
     save_path = os.path.join(base_folder, 'images', 'lettuce_scene000000_{}.npz'.format(file_name))
     np.savez(save_path, images=img_list, focal=focal_list, poses=extrinsics_list, verts=vertices_list)
+    print("File saved")
     
-def generate_transforms_file(base_folder, codeFlag=True, nb_images: int =50, file_name: str = 'transforms_train'):
+
+class FunctionCalls(Enum):
+    get_c2w_nerf_based = partial(pose_spherical)
+    get_c2w_from_blender = partial(get_3x4_P_matrix_from_blender)
+    get_c2w = partial(get_camera_matrix)
+
+    def __call__(self, *args):
+        return self.value(*args)
+
+def generate_transforms_file(base_folder, codeFlag=FunctionCalls.get_c2w_nerf_based, nb_images: int =50, file_name: str = 'transforms_train'):
     """
     FOR DEBUGGING ONLY. Create different transforms files which can be read by function save_scene_data() to visualize ray casting
     Args:
         nb_images: number of images per scene
-        codeFlag: flag to set whether to use function get_camera_matrix(True)
-        or get_3x4_P_matrix_from_blender(False)
+        codeFlag: 
     """
     base_dist = 9.915478183682518 # hardcoded, value taken from code output
     angle_x = 0.8575560450553894 # hardcoded, value taken from code output
@@ -229,10 +274,16 @@ def generate_transforms_file(base_folder, codeFlag=True, nb_images: int =50, fil
         elevation = 15 * t + (1 - t) * 75    # range of elevation: 15-75 deg    
         dist = base_dist   
 
-        if codeFlag:
+        if codeFlag == FunctionCalls.get_c2w:
             transformation_matrix = get_camera_matrix(azimuth, elevation, dist)
-        else:
+        elif codeFlag == FunctionCalls.get_c2w_from_blender:
             transformation_matrix, _, _ = get_3x4_P_matrix_from_blender(bpy.data.objects["Camera"])
+        elif codeFlag == FunctionCalls.get_c2w_nerf_based:
+            transformation_matrix = pose_spherical(elevation, azimuth, dist)
+        else:
+            print("This type is not supported")
+
+
         # create dictionary to append to frames
         # img_name = img.split('.')
         # img_name = img_name[:-1][-1]
@@ -271,5 +322,7 @@ if __name__ == "__main__":
     base_folder = '/home/sushmitawarrier/clevr-dataset-gen/output/GPU_data_rsynced/CLEVR_new000000/'
     #create_gif(base_folder)
     transforms_file_name = 'transforms_4'
-    generate_transforms_file(base_folder, codeFlag=False, nb_images=50, file_name=transforms_file_name)
+
+    generate_transforms_file(base_folder, codeFlag=FunctionCalls.get_c2w_nerf_based, nb_images=50, file_name=transforms_file_name)
+
     save_scene_data(base_folder, 35.0, file_name=transforms_file_name, nb_images=5)
