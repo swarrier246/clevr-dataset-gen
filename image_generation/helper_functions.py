@@ -321,8 +321,8 @@ def create_gif(base_folder):
 if __name__ == "__main__":
     base_folder = '/home/sushmitawarrier/clevr-dataset-gen/output/GPU_data_rsynced/CLEVR_new000000/'
     #create_gif(base_folder)
-    transforms_file_name = 'transforms_4'
+    transforms_file_name = 'transforms_test'
 
     generate_transforms_file(base_folder, codeFlag=FunctionCalls.get_c2w_nerf_based, nb_images=50, file_name=transforms_file_name)
 
-    save_scene_data(base_folder, 35.0, file_name=transforms_file_name, nb_images=5)
+    # save_scene_data(base_folder, 35.0, file_name=transforms_file_name, nb_images=5)
