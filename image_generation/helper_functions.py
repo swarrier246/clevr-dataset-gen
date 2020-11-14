@@ -3,16 +3,49 @@ import glob
 import os, sys, math #, cv2
 import numpy as np
 from PIL import Image
-from utils import ObjLoader
+# from utils import ObjLoader
 from functools import partial
 from enum import Enum
-import bpy
-import bpy_extras
-from mathutils import Matrix
-from mathutils import Vector
-# from render_images_custom import config_cam
 
 
+def config_cam(azimuth, elevation, dist, tilt=0):
+  """
+  Author: Amit Raj
+  Utility function to generate camera location and rotation Vectors    
+  Parameters:
+    azimuth: float
+        Azimuth angle in radians
+    elevation: float
+        Elevation angle in radians
+    dist : float
+        Distance of viewing sphere
+    tilt : float
+        In Plane rotation in radians    
+  Returns:
+    location : mathutils.Vector
+        Camera location setting
+    rotation : mathutils.Vector
+        Camera rotation setting
+  """    
+  elevation = math.radians(elevation)
+  azimuth = math.radians(azimuth)
+  z = dist * np.sin(elevation)
+  y = -dist * np.cos(azimuth) * np.cos(elevation)
+  x = dist * np.sin(azimuth) * np.cos(elevation)    
+  location = np.array([x, y, z])   
+  xr = np.pi / 2 - elevation
+  yr = tilt
+  zr = azimuth    
+  rotation = np.array([xr, yr, zr])    
+  return location, rotation
+
+def save_set_cam_outputs(base_folder, location, rotation):
+    """
+    Save the outputs of config cam to a file
+    """
+    filename = os.path.join(base_folder, 'images', 'CLEVR_new000000', 'set_cams.npz')
+    np.savez(filename, set_loc=location, set_rot=rotation)
+    print("Set Cameras saved to {}".format(filename)) 
 
 # c2w generated based on nerf's load_blender.py
 trans_t = lambda t : np.array([[1,0,0,0],
@@ -35,10 +68,21 @@ rot_theta = lambda th : np.array([
 ], dtype=np.float32)
 
 def pose_spherical(theta, phi, radius):
+    """
+    https://www.mathworks.com/help/phased/ref/azel2phitheta.html#d122e204387
+
+    """
     c2w = trans_t(radius)
-    c2w = rot_phi(phi/180.*np.pi) @ c2w
-    c2w = rot_theta(theta/180.*np.pi) @ c2w
+    # original
+    c2w = rot_phi(phi/180.*np.pi + np.pi) @ c2w
+    c2w = rot_theta(theta/180.*np.pi + np.pi) @ c2w
     c2w = np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
+    # # edits to check
+    # c2w = rot_phi(phi/180.*np.pi ) @ c2w
+    # c2w = rot_theta(theta/180.*np.pi) @ c2w
+    # c2w = np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
+    # added to check
+    # c2w[:3, :] = (-1)*c2w[:3, :]
     return c2w
 
 
@@ -50,7 +94,7 @@ def pose_spherical(theta, phi, radius):
 # See notes on this in 
 # blender.stackexchange.com/questions/15102/what-is-blenders-camera-projection-matrix-model
 
-def get_calibration_matrix_K_from_blender(camd):
+# def get_calibration_matrix_K_from_blender(camd):
     """
     Author: R Fabbri
     Code taken from https://blender.stackexchange.com/questions/38009/3x4-camera-matrix-from-blender-camera
@@ -99,24 +143,32 @@ def get_calibration_matrix_K_from_blender(camd):
 #         used in digital images)
 #       - right-handed: positive z look-at direction
 
-def get_3x4_RT_matrix_from_blender(cam):
+def get_3x4_RT_matrix_from_blender(cam, azimuth, elevation, dist):
     """
     Author: R Fabbri
     Code taken from https://blender.stackexchange.com/questions/38009/3x4-camera-matrix-from-blender-camera
     """
     # bcam stands for blender camera
-    R_bcam2cv = Matrix(
-        ((1, 0,  0),
-         (0, -1, 0),
-         (0, 0, -1)))    
+    R_bcam2cv = np.array([
+        [1, 0,  0],
+        [0, -1, 0],  #changed this from -1 for our coords
+        [0, 0, -1]])    
     # Transpose since the rotation is object rotation, 
     # and we want coordinate rotation
+
     # R_world2bcam = cam.rotation_euler.to_matrix().transposed()
     # T_world2bcam = -1*R_world2bcam * location
     #
     # Use matrix_world instead to account for all constraints
-    location, rotation = cam.matrix_world.decompose()[0:2]
-    R_world2bcam = rotation.to_matrix().transposed()    
+    # location, rotation = cam.matrix_world.decompose()[0:2]
+    # Trial:
+    location, rotation = config_cam(azimuth, elevation, dist)
+    location = np.array(location)
+    rot = np.array(rotation)
+    np.testing.assert_array_almost_equal(rotation, rot)
+    rot = np.asmatrix(rot)
+    R_world2bcam = rot #rotation.to_matrix().transposed()    
+    print(R_world2bcam)
     
     # Convert camera location to translation vector used in coordinate changes
     # T_world2bcam = -1*R_world2bcam*cam.location
@@ -126,27 +178,38 @@ def get_3x4_RT_matrix_from_blender(cam):
     # NOTE: Use * instead of @ here for older versions of Blender
     # TODO: detect Blender version
     R_world2cv = R_bcam2cv*R_world2bcam
-    T_world2cv = R_bcam2cv*T_world2bcam    # put into 3x4 matrix
-    RT = Matrix((
+    T_world2cv = R_bcam2cv*T_world2bcam    
+    # put into 3x4 matrix
+    print("blah", T_world2cv, type(R_world2cv))
+    # RT = np.array((
+    #     R_world2cv[0][:] + (T_world2cv[0],),
+    #     R_world2cv[1][:] + (T_world2cv[1],),
+    #     R_world2cv[2][:] + (T_world2cv[2],)
+    #      ))
+    RT = np.array((
         R_world2cv[0][:] + (T_world2cv[0],),
         R_world2cv[1][:] + (T_world2cv[1],),
         R_world2cv[2][:] + (T_world2cv[2],)
          ))
     return RT
     
-def get_3x4_P_matrix_from_blender(cam):
+def get_3x4_P_matrix_from_blender(cam, azimuth, elevation, dist):
     """
     Author: R. Fabbri
     Code taken from https://blender.stackexchange.com/questions/38009/3x4-camera-matrix-from-blender-camera
     Returns:
-        Projection matrix
+        Transformation matrix
         Calibration matrix
         RT (Rot and translation) matrices
     """
-    K = get_calibration_matrix_K_from_blender(cam.data)
-    RT = get_3x4_RT_matrix_from_blender(cam)
+    transformation_mat = np.zeros((4,4))
+    # K = get_calibration_matrix_K_from_blender(cam.data)
+    RT = get_3x4_RT_matrix_from_blender(cam, azimuth, elevation, dist)
     # return K@RT, K, RT
-    return np.array(K*RT), K, RT
+    transformation_mat[:3,:] = RT
+    transformation_mat[3,3] = 1.0
+    #return np.array(K*RT), K, RT
+    return transformation_mat, RT
 
 
 def get_camera_matrix(az=0, ele=0, dist=0):
@@ -161,14 +224,14 @@ def get_camera_matrix(az=0, ele=0, dist=0):
     R0 = np.zeros([3, 3])
     C = np.zeros([3, 4])  # camera matrix
     T = np.zeros([4,4]) # transformation matrix
-    # R0[0, 1] = 1
-    # R0[1, 0] = -1
-    # R0[2, 2] = 1
+    R0[0, 1] = 1
+    R0[1, 0] = -1
+    R0[2, 2] = 1
 
     # trying something
-    R0[0, 1] = -1
-    R0[1, 0] = -1
-    R0[2, 2] = -1
+    # R0[0, 1] = -1
+    # R0[1, 0] = -1
+    # R0[2, 2] = -1
 
     az = az * math.pi / 180
     ele = ele * math.pi / 180
@@ -193,9 +256,9 @@ def get_camera_matrix(az=0, ele=0, dist=0):
     T[:3, :] = C
     T[3, 3] = 1.0
     return T
-   
 
-def save_scene_data(base_folder, focal_length, file_name='transforms_train', nb_images=None):
+
+# def save_scene_data(base_folder, focal_length, file_name='transforms_train', nb_images=None):
     """
     Save scene data to npz file for ray casting visualization
     Args:
@@ -241,7 +304,7 @@ def save_scene_data(base_folder, focal_length, file_name='transforms_train', nb_
 
     save_path = os.path.join(base_folder, 'images', 'lettuce_scene000000_{}.npz'.format(file_name))
     np.savez(save_path, images=img_list, focal=focal_list, poses=extrinsics_list, verts=vertices_list)
-    print("File saved")
+    print("File saved to {}".format(save_path))
     
 
 class FunctionCalls(Enum):
@@ -252,21 +315,23 @@ class FunctionCalls(Enum):
     def __call__(self, *args):
         return self.value(*args)
 
-def generate_transforms_file(base_folder, codeFlag=FunctionCalls.get_c2w_nerf_based, nb_images: int =50, file_name: str = 'transforms_train'):
+def generate_transforms_file(base_folder, codeFlag=FunctionCalls.get_c2w_nerf_based, nb_images: int =100, file_name: str = 'transforms_train'):
     """
     FOR DEBUGGING ONLY. Create different transforms files which can be read by function save_scene_data() to visualize ray casting
     Args:
         nb_images: number of images per scene
         codeFlag: 
     """
-    base_dist = 9.915478183682518 # hardcoded, value taken from code output
+    base_dist = 8.9 # hardcoded, value taken from code output
     angle_x = 0.8575560450553894 # hardcoded, value taken from code output
     t_list = np.linspace(0,1,nb_images)
 
     transforms = dict()
+    set_loc, set_rot = [], []
     transforms.update({"camera_angle_x": angle_x})
     # Generate frames (list of dictionaries) for transforms. json file (nerf)
     frames = []
+    #cam = bpy.data.objects["Camera"]
     for j in range(nb_images):
         img_name = './{}'.format(str(j).zfill(6))
         t = t_list[j]
@@ -277,12 +342,17 @@ def generate_transforms_file(base_folder, codeFlag=FunctionCalls.get_c2w_nerf_ba
         if codeFlag == FunctionCalls.get_c2w:
             transformation_matrix = get_camera_matrix(azimuth, elevation, dist)
         elif codeFlag == FunctionCalls.get_c2w_from_blender:
-            transformation_matrix, _, _ = get_3x4_P_matrix_from_blender(bpy.data.objects["Camera"])
+            #transformation_matrix, _ = get_3x4_P_matrix_from_blender(cam, azimuth, elevation, dist)
+            pass
         elif codeFlag == FunctionCalls.get_c2w_nerf_based:
-            transformation_matrix = pose_spherical(elevation, azimuth, dist)
+            # transformation_matrix = pose_spherical(elevation, azimuth, dist)
+            transformation_matrix = pose_spherical(azimuth, elevation, dist)
+            
         else:
             print("This type is not supported")
-
+        loc, rot = config_cam(azimuth, elevation, dist)
+        set_loc.append(loc)
+        set_rot.append(rot)
 
         # create dictionary to append to frames
         # img_name = img.split('.')
@@ -293,6 +363,8 @@ def generate_transforms_file(base_folder, codeFlag=FunctionCalls.get_c2w_nerf_ba
 
     # Update transforms dict with frame information and dump into json file
     transforms.update({"frames": frames})
+
+    save_set_cam_outputs(base_folder, set_loc, set_rot)
 
     # NeRF specific work
     train_path = os.path.join(base_folder, 'images', 'CLEVR_new000000')
@@ -316,13 +388,13 @@ def create_gif(base_folder):
         img_list.append(im)
     save_file = os.path.join(base_folder, 'animated_gif.gif')
     img_list[0].save(save_file,
-               save_all=True, append_images=img_list[1:], optimize=False, duration=120, loop=0)
+               save_all=True, append_images=img_list[1:], optimize=False, duration=180, loop=0)
 
 if __name__ == "__main__":
-    base_folder = '/home/sushmitawarrier/clevr-dataset-gen/output/GPU_data_rsynced/CLEVR_new000000/'
-    #create_gif(base_folder)
-    transforms_file_name = 'transforms_test'
+    base_folder = '/home/sushmitawarrier/clevr-dataset-gen/output/'
+    # create_gif(base_folder)
+    transforms_file_name = 'transforms_train_4'
 
-    generate_transforms_file(base_folder, codeFlag=FunctionCalls.get_c2w_nerf_based, nb_images=50, file_name=transforms_file_name)
+    generate_transforms_file(base_folder, codeFlag=FunctionCalls.get_c2w, nb_images=100, file_name=transforms_file_name)
 
-    # save_scene_data(base_folder, 35.0, file_name=transforms_file_name, nb_images=5)
+    # save_scene_data(base_folder, 35.0, file_name=transforms_file_name)

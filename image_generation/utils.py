@@ -6,7 +6,7 @@
 # of patent rights can be found in the PATENTS file in the same directory.
 
 import sys, random, os
-# import bpy, bpy_extras
+import bpy, bpy_extras
 
 
 """
@@ -15,7 +15,7 @@ Some utility functions for interacting with Blender
 
 
 def extract_args(input_argv=None):
-  import bpy, bpy_extras
+  # import bpy, bpy_extras
   """
   Pull out command-line arguments after "--". Blender ignores command-line flags
   after --, so this lets us forward command line arguments from the blender

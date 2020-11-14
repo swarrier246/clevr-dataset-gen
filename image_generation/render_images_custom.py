@@ -11,6 +11,7 @@ from datetime import datetime as dt
 from collections import Counter
 import numpy as np
 from math import isclose
+
 import bmesh
 import statistics
 from helper_functions import get_camera_matrix
@@ -197,7 +198,7 @@ def main(args):
   
   all_scene_paths = []
   vol_list = []
-  num_images_per_scene = 50
+  num_images_per_scene = 20
 
   for i in range(args.num_scenes):
     # for j in range(num_images_per_scene):
@@ -259,34 +260,35 @@ def _register_meshes():
       meshes.append(obj)
   return meshes
 
+
 def config_cam(azimuth, elevation, dist, tilt=0):
-    """
-    Author: Amit Raj
-    Utility function to generate camera location and rotation Vectors    
-    Parameters:
-      azimuth: float
-          Azimuth angle in radians
-      elevation: float
-          Elevation angle in radians
-      dist : float
-          Distance of viewing sphere
-      tilt : float
-          In Plane rotation in radians    
-    Returns:
-      location : mathutils.Vector
-          Camera location setting
-      rotation : mathutils.Vector
-          Camera rotation setting
-    """    
-    z = dist * np.sin(elevation)
-    y = -dist * np.cos(azimuth) * np.cos(elevation)
-    x = dist * np.sin(azimuth) * np.cos(elevation)    
-    location = Vector((x, y, z))   
-    xr = np.pi / 2 - elevation
-    yr = tilt
-    zr = azimuth    
-    rotation = Vector((xr, yr, zr))    
-    return location, rotation
+  """
+  Author: Amit Raj
+  Utility function to generate camera location and rotation Vectors    
+  Parameters:
+    azimuth: float
+        Azimuth angle in radians
+    elevation: float
+        Elevation angle in radians
+    dist : float
+        Distance of viewing sphere
+    tilt : float
+        In Plane rotation in radians    
+  Returns:
+    location : mathutils.Vector
+        Camera location setting
+    rotation : mathutils.Vector
+        Camera rotation setting
+  """    
+  z = dist * np.sin(elevation)
+  y = -dist * np.cos(azimuth) * np.cos(elevation)
+  x = dist * np.sin(azimuth) * np.cos(elevation)    
+  location = Vector((x, y, z))   
+  xr = np.pi / 2 - elevation
+  yr = tilt
+  zr = azimuth    
+  rotation = Vector((xr, yr, zr))    
+  return location, rotation
 
 
 def convert_to_array(matrix_obj):
@@ -353,7 +355,7 @@ def render_scene(args,
     output_scene='render_json',
     output_blendfile=None,
     output_obj_folder=None,
-    num_imgs_per_scene=60
+    num_imgs_per_scene=50
   ):
   
   if not os.path.isdir(output_obj_folder):
@@ -415,11 +417,11 @@ def render_scene(args,
   def rand(L):
     return 2.0 * L * (random.random() - 0.5)
   
-  # Get camera location and rotation to move in a 'viewing sphere' per scene
+  # Get camera location and rotation to move in a 'viewing spiral' per scene
   camera = bpy.data.objects["Camera"]  
   angle_x = camera.data.angle_x  
   # printing camera parameters for debugging
-  print("camera sensor height: ", camera.data.sensor_height, ",camera sensor width: ", camera.data.sensor_width, ",camera focal length: ", camera.data.lens,",and camera angle_x (as used in NeRF): ", angle_x)
+  # print("camera sensor height: ", camera.data.sensor_height, ",camera sensor width: ", camera.data.sensor_width, ",camera focal length: ", camera.data.lens,",and camera angle_x (as used in NeRF): ", angle_x)
   transforms = dict()
   transforms.update({"camera_angle_x": angle_x})
  
@@ -501,33 +503,55 @@ def render_scene(args,
   t_list = np.linspace(0,1,num_imgs_per_scene)
   # Generate frames (list of dictionaries) for transforms. json file (nerf)
   frames = []
-  for j in range(num_imgs_per_scene):
-    img = os.path.join(output_folder, output_image) % j
-    render_args.filepath = img   # absolute file path for output img being rendered 
-    # print("render args filepath: ", output_folder, " joined: ", img)
-    t = t_list[j]
-    azimuth = 180 + (-180 * t + (1 - t) * 180)  # range of azimuth: 0-360 deg
-    elevation = 15 * t + (1 - t) * 75        # range of elevation: 15-75 deg    
-    #jitter_t = np.random.rand()   # Jitter the viewing sphere
-    #jitter = -args.camera_jitter * (1 - jitter_t) + jitter_t * args.camera_jitter
-    dist = base_dist # + jitter   
+  """
+  Leaving nb of images per scene to same as nerf's datasets. 
+  """
 
-    transformation_matrix = get_camera_matrix(azimuth, elevation, dist)
+  # for j in range(num_imgs_per_scene):
+  #   img = os.path.join(output_folder, output_image) % j
+  #   render_args.filepath = img   # absolute file path for output img being rendered 
+  #   t = t_list[j]
+  #   azimuth = 180 + (-180 * t + (1 - t) * 180)  # range of azimuth: 0-360 deg
+  #   elevation = 15 * t + (1 - t) * 75        # range of elevation: 15-75 deg    
+  #   #jitter_t = np.random.rand()   # Jitter the viewing sphere
+  #   #jitter = -args.camera_jitter * (1 - jitter_t) + jitter_t * args.camera_jitter
+  #   dist = base_dist # + jitter   
+
+  #   cam_loc = camera.location
+  #   cam_rot = camera.rotation_euler
+  #   print("Printnig loc", cam_loc, "and rot", cam_rot)
+
+  #   transformation_matrix = get_camera_matrix(azimuth, elevation, dist)
     
-    # create dictionary to append to frames
-    img_name = img.split('.')
-    img_name = img_name[:-1][-1]
-    scene_tranformation_dict = dict()
-    scene_tranformation_dict = {"file_path": img_name, "rotation": np.random.random(), "transform_matrix": transformation_matrix.tolist()}
-    print("scene transformation dict", scene_tranformation_dict)
-    frames.append(scene_tranformation_dict)
+  #   # create dictionary to append to frames
+  #   img_name = img.split('.')
+  #   img_name = img_name[:-1][-1]
+  #   scene_tranformation_dict = dict()
+  #   scene_tranformation_dict = {"file_path": img_name, "rotation": np.random.random(), "transform_matrix": transformation_matrix.tolist()}
+  #   # print("scene transformation dict", scene_tranformation_dict)
+  #   frames.append(scene_tranformation_dict)
 
-    # set camera location and rotation  
-    location, rotation = config_cam(
-        math.radians(azimuth), math.radians(elevation), dist
-    )       
-    camera.location = location
-    camera.rotation_euler = rotation
+    # set camera location and rotation
+    # This is disabled to read poses from nerf's dataset  
+    # location, rotation = config_cam(
+    #     math.radians(azimuth), math.radians(elevation), dist
+    # ) 
+
+  # Read location and rotation from nerf's dataset - currently only reads train matrices for the lego dataset
+  print("folderpath", output_folder)
+  pose_path = os.path.join(output_folder,'nerf_cams_train.npz')
+  poses = np.load(pose_path)
+  print("printing set loc", poses['set_loc'], "and rot", poses['set_rot']) 
+
+  # np.testing.assert_array_almost_equal(location, cam_loc, 2, "location not same")
+  # np.testing.assert_array_almost_equal(rotation, cam_rot, 2, "rotation not same")
+  for j in range(len(poses['set_rot'])):
+    img = os.path.join(output_folder, output_image) % j
+    render_args.filepath = img
+    rot = poses['set_rot'][j]
+    t = poses['set_loc'][j]
+    camera.location = Vector(t)
+    camera.rotation_euler = Vector(rot)
 
     # Render the scene and dump the scene data structure
     scene_struct['objects'] = objects
@@ -559,8 +583,8 @@ def render_scene(args,
   if os.path.isdir(train_path):
     train_file = os.path.join(train_path, 'transforms_train.json')
   else:
-      train_path = os.mkdir(train_path)
-      train_file = os.path.join(train_path, 'transforms_train.json')
+    train_path = os.mkdir(train_path)
+    train_file = os.path.join(train_path, 'transforms_train.json')
   with open(train_file, 'w') as outfile:
       json.dump(transforms, outfile)
     
