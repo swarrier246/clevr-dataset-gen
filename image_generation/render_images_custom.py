@@ -537,46 +537,50 @@ def render_scene(args,
     #     math.radians(azimuth), math.radians(elevation), dist
     # ) 
 
-  # Read location and rotation from nerf's dataset - currently only reads train matrices for the lego dataset
-  print("folderpath", output_folder)
-  pose_path = os.path.join(output_folder,'nerf_cams_train.npz')
-  poses = np.load(pose_path)
-  print("printing set loc", poses['set_loc'], "and rot", poses['set_rot']) 
+  # Read location and rotation from nerf's dataset - currently only reads train filetype matrices for the lego dataset
+  # NOTE: SINCE THE DATASET GENERATED IS UNIQUE IN EACH INSTANCE, WE NEED TO GENERATE IMAGES FOR TRAIN, TEST AND VAL IN ONE GO. NOT DOING SO CAN RESULT IN THE SCENE CHANGING BETWEEN TWO FOLDERS
+  # TRAIN AND VAL DATASETS FOR LEGO HAVE 100 IMGS EACH, BUT TEST HAS 200 IMGS.
+  filetype_list = ['train', 'test', 'val']
+  for filetype in filetype_list:
+    save_folder = os.path.join(output_folder, filetype)
+    if not os.path.exists(save_folder):
+      os.makedirs(save_folder)
+    print("output folder path", save_folder)
+    pose_path = os.path.join(output_folder,'nerf_cams_{}.npz'.format(filetype))
+    poses = np.load(pose_path)
 
-  # np.testing.assert_array_almost_equal(location, cam_loc, 2, "location not same")
-  # np.testing.assert_array_almost_equal(rotation, cam_rot, 2, "rotation not same")
-  for j in range(len(poses['set_rot'])):
-    img = os.path.join(output_folder, output_image) % j
-    render_args.filepath = img
-    rot = poses['set_rot'][j]
-    t = poses['set_loc'][j]
-    camera.location = Vector(t)
-    camera.rotation_euler = Vector(rot)
+    for j in range(len(poses['set_rot'])):
+      img = os.path.join(save_folder, output_image) % j
+      render_args.filepath = img
+      rot = poses['set_rot'][j]
+      t = poses['set_loc'][j]
+      camera.location = Vector(t)
+      camera.rotation_euler = Vector(rot)
 
-    # Render the scene and dump the scene data structure
-    scene_struct['objects'] = objects
-    scene_struct['relationships'] = compute_all_relationships(scene_struct)
-    while True:
-      try:
-        bpy.ops.render.render(write_still=True)
-        break
-      except Exception as e:
-        print(e)
+      # Render the scene and dump the scene data structure
+      scene_struct['objects'] = objects
+      scene_struct['relationships'] = compute_all_relationships(scene_struct)
+      while True:
+        try:
+          bpy.ops.render.render(write_still=True)
+          break
+        except Exception as e:
+          print(e)
 
-    obj_file_template = '%%0%dd.obj' % 6  # num_digits hardcoded here
-    print(" export scene obj path: ", os.path.join(output_obj_folder, obj_file_template) % j)
-    bpy.ops.export_scene.obj(filepath=os.path.join(output_obj_folder, obj_file_template) % j)
+      obj_file_template = '%%0%dd.obj' % 6  # num_digits hardcoded here
+      print(" export scene obj path: ", os.path.join(output_obj_folder, obj_file_template) % j)
+      bpy.ops.export_scene.obj(filepath=os.path.join(output_obj_folder, obj_file_template) % j)
 
-    with open(output_scene, 'w') as f:
-      json.dump(scene_struct, f, indent=2)
+      with open(output_scene, 'w') as f:
+        json.dump(scene_struct, f, indent=2)
 
-    bpy.ops.object.select_all(action='DESELECT')
+      bpy.ops.object.select_all(action='DESELECT')
 
-    if output_blendfile is not None:
-      bpy.ops.wm.save_as_mainfile(filepath=output_blendfile)
-  
-  # Update transforms dict with frame information and dump into json file
-  transforms.update({"frames": frames})
+      if output_blendfile is not None:
+        bpy.ops.wm.save_as_mainfile(filepath=output_blendfile)
+    
+    # Update transforms dict with frame information and dump into json file
+    transforms.update({"frames": frames})
 
   # NeRF specific work
   train_path = './train'
