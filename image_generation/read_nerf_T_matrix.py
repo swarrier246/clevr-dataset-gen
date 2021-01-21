@@ -23,7 +23,7 @@ def read_T_matrix(filepath):
         rot_euler = rot.xyz()
         loc_array.append(loc)
         rot_array.append(rot_euler)
-    savefile_path = os.path.join(base_folder, 'images', 'CLEVR_new000000', 'nerf_cams_{}.npz'.format(filetype))
+    savefile_path = os.path.join(base_folder, 'images', 'CLEVR_new000001', 'nerf_cams_{}.npz'.format(filetype))
     np.savez(savefile_path, set_loc=loc_array, set_rot=rot_array)
 
 if __name__ == "__main__":

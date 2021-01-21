@@ -377,6 +377,7 @@ def render_scene(args,
   render_args = bpy.context.scene.render
   render_args.engine = "CYCLES"
   render_args.filepath = output_image
+  render_args.image_settings.color_mode='RGBA'
   render_args.resolution_x = args.width
   render_args.resolution_y = args.height
   render_args.resolution_percentage = 100
@@ -561,6 +562,8 @@ def render_scene(args,
       scene_struct['objects'] = objects
       scene_struct['relationships'] = compute_all_relationships(scene_struct)
       while True:
+        # set background to transparent when rendering
+        bpy.types.CyclesRenderSettings.film_transparent = True
         try:
           bpy.ops.render.render(write_still=True)
           break
