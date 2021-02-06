@@ -77,14 +77,7 @@ def pose_spherical(theta, phi, radius):
     c2w = rot_phi(phi/180.*np.pi + np.pi) @ c2w
     c2w = rot_theta(theta/180.*np.pi + np.pi) @ c2w
     c2w = np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
-    # # edits to check
-    # c2w = rot_phi(phi/180.*np.pi ) @ c2w
-    # c2w = rot_theta(theta/180.*np.pi) @ c2w
-    # c2w = np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
-    # added to check
-    # c2w[:3, :] = (-1)*c2w[:3, :]
     return c2w
-
 
 #---------------------------------------------------------------
 # 3x4 P matrix from Blender camera

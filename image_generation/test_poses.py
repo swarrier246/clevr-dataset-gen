@@ -23,13 +23,14 @@ class TestPoses(unittest.TestCase):
     ele = 0
     tilt = 0
     dist = 3
+    # get location and rotation vector from az,ele and dist values
     loc, rot = config_cam(az, ele, dist)
+    # compute transformation matrix using pose_spherical function
     computed_T = pose_spherical(az, ele, dist)
     pose_i = gtsam.Pose3(computed_T)
+    # Construct pose using rotation and location vectors
     pose_j = gtsam.Pose3(gtsam.Rot3.RzRyRx(rot), loc)
-    # Returns false, both poses unequal by a significant amt
-    # np.testing.assert_array_almost_equal(pose_i.matrix(), pose_j.matrix())
-    # rot3 method xyz
+    # Compares rotation vector from constructed pose with rotation vector initially computed 
     rot_p = pose_j.rotation()
     rot_from_ele = rot_p.xyz()
     # Returns true
