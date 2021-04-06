@@ -538,7 +538,6 @@ def render_scene(args,
     #     math.radians(azimuth), math.radians(elevation), dist
     # ) 
 
-  # Read location and rotation from nerf's dataset - currently only reads train filetype matrices for the lego dataset
   # NOTE: SINCE THE DATASET GENERATED IS UNIQUE IN EACH INSTANCE, WE NEED TO GENERATE IMAGES FOR TRAIN, TEST AND VAL IN ONE GO. NOT DOING SO CAN RESULT IN THE SCENE CHANGING BETWEEN TWO FOLDERS
   # TRAIN AND VAL DATASETS FOR LEGO HAVE 100 IMGS EACH, BUT TEST HAS 200 IMGS.
   filetype_list = ['train', 'test', 'val']

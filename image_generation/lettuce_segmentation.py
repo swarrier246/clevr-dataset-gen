@@ -8,18 +8,23 @@ from sklearn.cluster import MeanShift, estimate_bandwidth
 import matplotlib.pyplot as plt
 import os
 
-def segment_green(foldername):
-    files = os.path.join(foldername, 'frame_1975.jpg')
+def segment_green(foldername, resize=False):
+    files = os.path.join(foldername, '*.jpg')
+    savepath = os.path.join(foldername, 'segmented')
     if not files: 
         raise Exception("files not found")
     file_path = glob.glob(files)
     file_path.sort()
+    print(len(file_path))
     for f in range(len(file_path)):
         img = cv2.imread(file_path[f])
+        plt.imshow(img)
+        plt.show()
         img2 = img.copy()
-        img = cv2.resize(img2, 
-                        (int(img2.shape[1] * 0.5), int(img2.shape[0] * 0.5)) 
-                        ) #scaling by half
+        if resize:
+            img = cv2.resize(img2, 
+                            (int(img2.shape[1] * 0.5), int(img2.shape[0] * 0.5)) 
+                            ) #scaling by half
         img2 = img.copy()
         hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
@@ -43,9 +48,9 @@ def segment_green(foldername):
         plt.show()
         break
 
-        foldername = os.path.dirname(file_path[f])
-        save_filename = os.path.join(foldername, "{:05d}.png".format(f))
+        #foldername = os.path.dirname(file_path[f])
+        save_filename = os.path.join(savepath, os.path.basename(file_path[f]))
         cv2.imwrite(save_filename, mask_final)
 
 if __name__ == "__main__":
-    segment_green('/home/sushmitawarrier/Desktop/datasets/lettuce_video/images')
+    segment_green('/home/sushmitawarrier/lettuce_nonblurred')
